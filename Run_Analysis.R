@@ -1,58 +1,71 @@
-library(reshape2)
 
-filename <- "dataset.zip"
+library(dplyr)
 
-## If the data doesn't exist we will download it:
-if (!file.exists(filename)){
-  fileURL <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip "
-  download.file(fileURL, filename, method="curl")
-}  
-if (!file.exists("UCI HAR Dataset")) { 
-  unzip(filename) 
+
+zipUrl <- "https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip"
+zipFile <- "dataset.zip"
+
+if (!file.exists(zipFile)) {
+  download.file(zipUrl, zipFile, mode = "wb")
 }
 
+dataPath <- "UCI HAR Dataset"
+if (!file.exists(dataPath)) {
+  unzip(zipFile)
+}
+
+# read training data from files 
+trainingSubjects <- read.table(file.path(dataPath, "train", "subject_train.txt"))
+trainingValues <- read.table(file.path(dataPath, "train", "X_train.txt"))
+trainingActivity <- read.table(file.path(dataPath, "train", "y_train.txt"))
+
+# read test data from files 
+testSubjects <- read.table(file.path(dataPath, "test", "subject_test.txt"))
+testValues <- read.table(file.path(dataPath, "test", "X_test.txt"))
+testActivity <- read.table(file.path(dataPath, "test", "y_test.txt"))
 
 # Loading the activity labels and features
-ActivityLabels <- read.table("UCI HAR Dataset/activity_labels.txt")
-ActivityLabels[,2] <- as.character(ActivityLabels[,2])
-features <- read.table("UCI HAR Dataset/features.txt")
-features[,2] <- as.character(features[,2])
+features <- read.table(file.path(dataPath, "features.txt"), as.is = TRUE)
+activities <- read.table(file.path(dataPath, "activity_labels.txt"))
+colnames(activities) <- c("activityId", "activityLabel")
 
 
-
-# Extracts only the measurements on the mean and standard deviation for each measurement.
-Newfeatures <- grep(".*mean.*|.*std.*", features[,2])
-Newfeatures.names <- features[Newfeatures,2]
-Newfeatures.names = gsub('-mean', 'Mean', Newfeatures.names)
-Newfeatures.names = gsub('-std', 'Std', Newfeatures.names)
-Newfeatures.names <- gsub('[-()]', '', Newfeatures.names)
-
-
-# Load the datasets from train dataset 
-train <- read.table("UCI HAR Dataset/train/X_train.txt")[Newfeatures]
-trainActivities <- read.table("UCI HAR Dataset/train/Y_train.txt")
-trainSubjects <- read.table("UCI HAR Dataset/train/subject_train.txt")
-train <- cbind(trainSubjects, trainActivities, train)
+HActivity <- rbind(
+  cbind(trainingSubjects, trainingValues, trainingActivity),
+  cbind(testSubjects, testValues, testActivity)
+)
+rm(trainingSubjects, trainingValues, trainingActivity, 
+   testSubjects, testValues, testActivity)
+colnames(HActivity) <- c("subject", features[, 2], "activity")
 
 
-# Load the datasets from test dataset 
-test <- read.table("UCI HAR Dataset/test/X_test.txt")[Newfeatures]
-testActivities <- read.table("UCI HAR Dataset/test/Y_test.txt")
-testSubjects <- read.table("UCI HAR Dataset/test/subject_test.txt")
-test <- cbind(testSubjects, testActivities, test)
+columnsToKeep <- grepl("subject|activity|mean|std", colnames(HActivity))
+HActivity <- HActivity[, columnsToKeep]
 
+# replace activity values with factor levels
+HActivity$activity <- factor(HActivity$activity, 
+                                 levels = activities[, 1], labels = activities[, 2])
 
-# Merges the training and the test sets to create one data set.
-Data <- rbind(train, test)
-colnames(Data) <- c("subject", "activity", Newfeatures.names)
+# get column names and remove special characters
+HActivityCols <- colnames(HActivity)
+HActivityCols <- gsub("[\\(\\)-]", "", HActivityCols)
 
-Data$activity <- factor(Data$activity, levels = activityLabels[,1], labels = activityLabels[,2])
-Data$subject <- as.factor(Data$subject)
+# expand abbreviations 
+HActivityCols <- gsub("^f", "frequencyDomain", HActivityCols)
+HActivityCols <- gsub("^t", "timeDomain", HActivityCols)
+HActivityCols <- gsub("Acc", "Accelerometer", HActivityCols)
+HActivityCols <- gsub("Gyro", "Gyroscope", HActivityCols)
+HActivityCols <- gsub("Mag", "Magnitude", HActivityCols)
+HActivityCols <- gsub("Freq", "Frequency", HActivityCols)
+HActivityCols <- gsub("mean", "Mean", HActivityCols)
+HActivityCols <- gsub("std", "StandardDeviation", HActivityCols)
+HActivityCols <- gsub("BodyBody", "Body", HActivityCols)
+colnames(HActivity) <- HActivityCols
 
-Data.melted <- melt(Data, id = c("subject", "activity"))
-Data.mean <- dcast(Data.melted, subject + activity ~ variable, mean)
+HActivityMeans <- HActivity %>% 
+  group_by(subject, activity) %>%
+  summarise_each(funs(mean))
 
-write.table(Data.mean, "TidyDataSet.txt", row.names = FALSE, quote = FALSE)
-
-
-
+# output to file "TidyDataSet.txt"
+write.table(HActivityMeans, "TidyDataSet.txt", row.names = FALSE, 
+            quote = FALSE)
